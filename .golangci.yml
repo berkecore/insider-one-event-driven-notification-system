@@ -1,0 +1,28 @@
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - misspell
+    - staticcheck
+    - unused
+  settings:
+    errcheck:
+      check-type-assertions: true
+      exclude-functions:
+        - (io.Closer).Close
+        - (*net/http.Response).Body.Close
+    govet:
+      enable-all: true
+      disable:
+        - fieldalignment
+        - shadow
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
