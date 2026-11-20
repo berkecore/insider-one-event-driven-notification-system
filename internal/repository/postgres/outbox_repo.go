@@ -67,10 +67,6 @@ func (r *OutboxRepo) ProcessPending(ctx context.Context, limit int, publishFn fu
 		return nil, nil
 	}
 
-	if err := publishFn(events); err != nil {
-		return nil, err
-	}
-
 	outboxIDs := make([]int64, len(events))
 	notifIDs := make([]uuid.UUID, len(events))
 	for i, ev := range events {
@@ -78,6 +74,9 @@ func (r *OutboxRepo) ProcessPending(ctx context.Context, limit int, publishFn fu
 		notifIDs[i] = ev.NotificationID
 	}
 
+	// Update DB state before pushing to Redis (within the same TX) so row-level locks
+	// guarantee workers dequeuing from Redis never observe a stale pre-commit 'pending' row.
+	// If publishFn fails, the deferred Rollback reverts both updates atomically.
 	if _, err := tx.Exec(ctx, `
 		UPDATE notification_outbox
 		SET published_at = NOW()
@@ -92,6 +91,10 @@ func (r *OutboxRepo) ProcessPending(ctx context.Context, limit int, publishFn fu
 		WHERE id = ANY($1) AND status = 'pending'
 	`, notifIDs); err != nil {
 		return nil, fmt.Errorf("mark notifications queued: %w", err)
+	}
+
+	if err := publishFn(events); err != nil {
+		return nil, err
 	}
 
 	if err := tx.Commit(ctx); err != nil {

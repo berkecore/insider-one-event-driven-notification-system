@@ -419,7 +419,7 @@ func (r *NotificationRepo) Replay(ctx context.Context, id uuid.UUID) (*domain.No
 	return n, nil
 }
 
-// ClaimForProcessing atomically transitions a notification from queued/retrying to processing.
+// ClaimForProcessing atomically transitions a notification from pending/queued/retrying to processing.
 // Returns (nil, nil) when the notification was already cancelled, delivered, or claimed by another worker.
 func (r *NotificationRepo) ClaimForProcessing(ctx context.Context, id uuid.UUID) (*domain.Notification, error) {
 	row := r.pool.QueryRow(ctx, `
@@ -428,7 +428,7 @@ func (r *NotificationRepo) ClaimForProcessing(ctx context.Context, id uuid.UUID)
 		    processing_started_at = NOW(),
 		    attempt_count = attempt_count + 1,
 		    updated_at = NOW()
-		WHERE id = $1 AND status IN ('queued', 'retrying')
+		WHERE id = $1 AND status IN ('pending', 'queued', 'retrying')
 		RETURNING `+notificationSelectColumns, id)
 
 	n, err := scanNotification(row)
