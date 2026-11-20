@@ -5,8 +5,8 @@
 *.dll
 *.so
 *.dylib
-server
-mockprovider
+/server
+/mockprovider
 
 # Test & coverage artifacts
 *.test
