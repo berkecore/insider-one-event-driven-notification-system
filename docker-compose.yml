@@ -1,0 +1,100 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-notifications}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-notifications}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    restart: unless-stopped
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "${JAEGER_UI_PORT:-16686}:16686"
+      - "4318:4318"
+
+  mock-provider:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: mockprovider
+    restart: unless-stopped
+    environment:
+      MOCK_PROVIDER_PORT: "8081"
+      MOCK_LATENCY_MS: "${MOCK_LATENCY_MS:-15}"
+      MOCK_FAIL_RATE: "${MOCK_FAIL_RATE:-0.0}"
+    ports:
+      - "8081:8081"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8081/health || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: server
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      mock-provider:
+        condition: service_healthy
+    environment:
+      APP_MODE: "${APP_MODE:-all}"
+      APP_ENV: "${APP_ENV:-development}"
+      LOG_LEVEL: "${LOG_LEVEL:-info}"
+      HTTP_PORT: "8080"
+      DATABASE_URL: "postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-notifications}?sslmode=disable"
+      DB_AUTO_MIGRATE: "true"
+      REDIS_ADDR: "redis:6379"
+      WEBHOOK_URL: "${WEBHOOK_URL:-http://mock-provider:8081/webhook}"
+      WEBHOOK_TIMEOUT: "${WEBHOOK_TIMEOUT:-10s}"
+      RATE_LIMIT_SMS: "${RATE_LIMIT_SMS:-100}"
+      RATE_LIMIT_EMAIL: "${RATE_LIMIT_EMAIL:-100}"
+      RATE_LIMIT_PUSH: "${RATE_LIMIT_PUSH:-100}"
+      WORKERS_PER_CHANNEL: "${WORKERS_PER_CHANNEL:-8}"
+      MAX_RETRY_ATTEMPTS: "${MAX_RETRY_ATTEMPTS:-5}"
+      RETRY_BASE_BACKOFF: "${RETRY_BASE_BACKOFF:-1s}"
+      RETRY_MAX_BACKOFF: "${RETRY_MAX_BACKOFF:-60s}"
+      CB_FAILURE_THRESHOLD: "${CB_FAILURE_THRESHOLD:-5}"
+      CB_COOLDOWN: "${CB_COOLDOWN:-15s}"
+      OTEL_EXPORTER: "${OTEL_EXPORTER:-otlp}"
+      OTEL_SERVICE_NAME: "notification-service"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "jaeger:4318"
+    ports:
+      - "${HTTP_PORT:-8080}:8080"
+
+volumes:
+  pg_data:
+  redis_data:
